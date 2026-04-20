@@ -1,0 +1,200 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import re
+
+# ─────────────────────────────────────────────
+# 1. LOAD & CLEAN DATA
+# ─────────────────────────────────────────────
+df = pd.read_csv('com_ dataset.csv', header=None, skiprows=2)
+df.columns = ['idx', 'name', 'ratings', 'review_count', 'ctype', 'years', 'hq', 'employees']
+
+df = df.apply(lambda col: col.str.strip() if col.dtype == 'object' else col)
+
+def parse_reviews(s):
+    s = str(s).replace('(', '').replace(')', '').replace(' Reviews', '').strip()
+    if 'k' in s.lower():
+        return float(s.lower().replace('k', '')) * 1000
+    try:
+        return float(s)
+    except:
+        return np.nan
+
+df['review_num'] = df['review_count'].apply(parse_reviews)
+df['age'] = df['years'].str.extract(r'(\d+)').astype(float)
+
+CURRENT_YEAR = 2025
+df['founded'] = (CURRENT_YEAR - df['age']).astype('Int64')
+
+def parse_hq(s):
+    s = str(s)
+    s = re.split(r'\s*\+', s)[0].strip()
+    parts = s.split(',')
+    return parts[0].strip()
+
+df['hq_city'] = df['hq'].apply(parse_hq)
+
+# ─────────────────────────────────────────────
+# 2. PRINT HQ TABLE
+# ─────────────────────────────────────────────
+print("=" * 55)
+print("  COMPANY HEADQUARTERS")
+print("=" * 55)
+for _, row in df.iterrows():
+    print(f"  {row['name']:<35} → {row['hq_city']}")
+print("=" * 55)
+
+# ─────────────────────────────────────────────
+# COLOUR PALETTE
+# ─────────────────────────────────────────────
+COLORS = [
+    '#4E79A7','#F28E2B','#E15759','#76B7B2','#59A14F',
+    '#EDC948','#B07AA1','#FF9DA7','#9C755F','#BAB0AC',
+    '#499894','#86BCB6','#D37295','#FABFD2','#B6992D',
+    '#F1CE63','#A0CBE8','#FFBE7D','#8CD17D','#B07AA1',
+]
+
+fig = plt.figure(figsize=(22, 20), facecolor='#1C1C2E')
+fig.suptitle('Company Dataset — Analytics Dashboard',
+             fontsize=22, fontweight='bold', color='white', y=0.98)
+
+# ─────────────────────────────────────────────
+# CHART 1 — PIE: Employee-size distribution
+# ─────────────────────────────────────────────
+ax1 = fig.add_subplot(2, 2, 1)
+ax1.set_facecolor('#1C1C2E')
+
+emp_counts = df['employees'].value_counts()
+labels_short = {
+    '1 Lakh+ Employees (India)':      '1 Lakh+',
+    '10k-50k Employees (India)':      '10k–50k',
+    '50k-1 Lakh Employees (India)':   '50k–1 Lakh',
+    '1k-5k Employees (India)':        '1k–5k',
+}
+pie_labels = [labels_short.get(l, l) for l in emp_counts.index]
+pie_colors  = COLORS[:len(emp_counts)]
+
+wedges, texts, autotexts = ax1.pie(
+    emp_counts.values,
+    labels=pie_labels,
+    autopct='%1.1f%%',
+    colors=pie_colors,
+    startangle=140,
+    pctdistance=0.75,
+    wedgeprops=dict(edgecolor='#1C1C2E', linewidth=2),
+)
+for t in texts:
+    t.set_color('white'); t.set_fontsize(10)
+for at in autotexts:
+    at.set_color('white'); at.set_fontweight('bold'); at.set_fontsize(9)
+
+ax1.set_title('Employee Size Distribution (Pie Chart)',
+              color='white', fontsize=13, fontweight='bold', pad=15)
+
+# ─────────────────────────────────────────────
+# CHART 2 — FUNNEL: Review count by company (top 15)
+# ─────────────────────────────────────────────
+ax2 = fig.add_subplot(2, 2, 2)
+ax2.set_facecolor('#1C1C2E')
+
+top15 = df.nlargest(15, 'review_num')[['name', 'review_num']].reset_index(drop=True)
+max_rev = top15['review_num'].max()
+
+bar_height = 0.65
+for i, (_, row) in enumerate(top15.iterrows()):
+    y_pos  = len(top15) - 1 - i
+    width  = row['review_num']
+    offset = (max_rev - width) / 2
+
+    ax2.barh(y_pos, width, left=offset, height=bar_height,
+             color=COLORS[i % len(COLORS)], edgecolor='#1C1C2E', linewidth=1)
+
+    rev_k = f"{row['review_num']/1000:.1f}k"
+    ax2.text(offset + width / 2, y_pos, rev_k,
+             ha='center', va='center', color='white',
+             fontsize=8, fontweight='bold')
+
+ax2.set_yticks(range(len(top15)))
+ax2.set_yticklabels(reversed(top15['name'].tolist()),
+                    color='white', fontsize=8)
+ax2.set_xticks([])
+ax2.spines[:].set_visible(False)
+ax2.set_title('Funnel Chart — Review Count by Company (Top 15)',
+              color='white', fontsize=13, fontweight='bold', pad=15)
+ax2.tick_params(axis='y', length=0)
+
+# ─────────────────────────────────────────────
+# CHART 3 — BAR: Company Rating
+# ─────────────────────────────────────────────
+ax3 = fig.add_subplot(2, 2, 3)
+ax3.set_facecolor('#1C1C2E')
+
+df_sorted = df.sort_values('ratings', ascending=True)
+bar_colors = [COLORS[i % len(COLORS)] for i in range(len(df_sorted))]
+bars = ax3.barh(df_sorted['name'], df_sorted['ratings'],
+                color=bar_colors, edgecolor='#1C1C2E', linewidth=0.8, height=0.7)
+
+for bar, val in zip(bars, df_sorted['ratings']):
+    ax3.text(val + 0.02, bar.get_y() + bar.get_height() / 2,
+             f'{val}', va='center', color='white', fontsize=8, fontweight='bold')
+
+ax3.set_xlim(0, df_sorted['ratings'].max() + 0.4)
+ax3.set_xlabel('Rating (out of 5)', color='white', fontsize=10)
+ax3.set_title('Company Ratings (Bar Chart)',
+              color='white', fontsize=13, fontweight='bold', pad=15)
+ax3.tick_params(axis='both', colors='white', labelsize=8)
+ax3.spines['top'].set_visible(False)
+ax3.spines['right'].set_visible(False)
+for sp in ['left', 'bottom']:
+    ax3.spines[sp].set_color('#555')
+
+avg = df['ratings'].mean()
+ax3.axvline(avg, color='#FFD700', linestyle='--', linewidth=1.2, alpha=0.8)
+ax3.text(avg + 0.05, 0.5, f'Avg {avg:.2f}',
+         transform=ax3.get_yaxis_transform(),
+         color='#FFD700', fontsize=8, va='bottom')
+
+# ─────────────────────────────────────────────
+# CHART 4 — LINE: Founded Year vs. Rating
+# ─────────────────────────────────────────────
+ax4 = fig.add_subplot(2, 2, 4)
+ax4.set_facecolor('#1C1C2E')
+
+df_line = df.dropna(subset=['founded', 'ratings']).sort_values('founded')
+
+ax4.plot(df_line['founded'], df_line['ratings'],
+         color='#4E79A7', linewidth=2, alpha=0.7, zorder=1)
+
+sc = ax4.scatter(df_line['founded'], df_line['ratings'],
+                 c=df_line['ratings'], cmap='RdYlGn',
+                 vmin=3.0, vmax=4.5, s=80, zorder=2,
+                 edgecolors='white', linewidths=0.6)
+
+for _, row in df_line.iterrows():
+    ax4.annotate(row['name'],
+                 xy=(row['founded'], row['ratings']),
+                 xytext=(4, 4), textcoords='offset points',
+                 color='#CCCCCC', fontsize=6.5, rotation=30)
+
+cbar = plt.colorbar(sc, ax=ax4, pad=0.02)
+cbar.ax.yaxis.set_tick_params(color='white')
+cbar.ax.tick_params(labelcolor='white', labelsize=8)
+cbar.set_label('Rating', color='white', fontsize=9)
+
+ax4.set_xlabel('Founded Year', color='white', fontsize=10)
+ax4.set_ylabel('Rating', color='white', fontsize=10)
+ax4.set_title('Rating vs. Founded Year (Line Chart)',
+              color='white', fontsize=13, fontweight='bold', pad=15)
+ax4.tick_params(axis='both', colors='white', labelsize=9)
+ax4.spines['top'].set_visible(False)
+ax4.spines['right'].set_visible(False)
+for sp in ['left', 'bottom']:
+    ax4.spines[sp].set_color('#555')
+
+# ─────────────────────────────────────────────
+# SAVE
+# ─────────────────────────────────────────────
+plt.tight_layout(rect=[0, 0, 1, 0.96])
+plt.savefig('company_dashboard.png', dpi=160, bbox_inches='tight', facecolor='#1C1C2E')
+plt.show()
+print("Done! Saved as company_dashboard.png")
